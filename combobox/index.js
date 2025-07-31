@@ -128,16 +128,22 @@ export class ComboBox extends Component {
             this.updateOptions(this.originalOptions, value)
         }
 
+        // --- Start of change ---
+        // Call filterOptions() on focus to prepare the dropdown list.
+        // The filterOptions() method already handles showing/hiding the list.
         this.input.addEventListener("focus", () => {
             this.isFocusWithin = true
-            this.showOptions()
+            this.filterOptions()
         })
 
+        // Call filterOptions() on click to handle cases where the user
+        // clicks a pre-populated input field.
         this.input.addEventListener("click", (e) => {
             if (this.optionsList.getAttribute("aria-hidden") === "true") {
-                this.showOptions()
+                this.filterOptions()
             }
         })
+        // --- End of change ---
 
         this.input.addEventListener("input", () => this.filterOptions())
         this.input.addEventListener("keydown", (e) => this.handleKeyDown(e))
