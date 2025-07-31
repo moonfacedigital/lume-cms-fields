@@ -6,65 +6,18 @@ import {
     view,
 } from "https://esm.sh/gh/lumeland/cms@752b7a796a1d7fded4b2a38bad813d6efcf03a49/static/components/utils.js"
 
-/**
- * @typedef {Object|string} Option
- * @property {string} [value] - The value of the option (if object)
- * @property {string} [label] - The display label of the option (if object)
- */
-
-/**
- * @typedef {Object} ComboBoxAttributes
- * @property {number} [maxlength] - Maximum length of input
- * @property {number} [minlength] - Minimum length of input
- * @property {string} [pattern] - Validation pattern
- * @property {string} [title] - Title attribute for validation message
- * @property {*} [key] - Additional attributes
- */
-
-/**
- * @typedef {Object} ComboBoxSchema
- * @property {string} name - Field name
- * @property {string} label - Field label
- * @property {string} [description] - Field description
- * @property {string} [value] - Initial value
- * @property {ComboBoxAttributes} [attributes] - Additional HTML attributes
- * @property {Option[]} options - Available options for the combobox
- */
-
-/**
- * Combobox custom element that extends the base Component class
- * @extends Component
- */
 export class ComboBox extends Component {
-    /**
-     * The input element
-     * @type {HTMLInputElement}
-     */
     input = null
 
-    /**
-     * The options list element
-     * @type {HTMLUListElement}
-     */
     optionsList = null
 
-    /**
-     * The dropdown button element
-     * @type {HTMLButtonElement}
-     */
-    button = null
+    originalOptions = []
 
-    /**
-     * Track if we're interacting with options
-     * @type {boolean}
-     */
-    interactingWithOptions = false
+    highlightedIndex = -1
 
-    /**
-     * Initialize the combobox component
-     */
+    isFocusWithin = false
+
     init() {
-        // Inject styles
         const style = document.createElement("style")
         style.textContent = `
             .combobox-container {
@@ -73,11 +26,9 @@ export class ComboBox extends Component {
             }
             
             .combobox-input {
-                padding-right: 2.5em;
                 width: 100%;
             }
             
-
             .combobox-options {
                 display: none;
                 flex-direction: column;
@@ -94,6 +45,8 @@ export class ComboBox extends Component {
                 border-radius: var(--border-radius);
                 z-index: 100;
                 box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                top: 100%;
+                left: 0;
             }
             
             .combobox-options[aria-hidden="false"] {
@@ -105,6 +58,7 @@ export class ComboBox extends Component {
                 border-radius: var(--border-radius);
                 cursor: pointer;
                 color: var(--color-input-text);
+                tab-index: -1; 
             }
             
             .combobox-option:hover,
@@ -116,16 +70,9 @@ export class ComboBox extends Component {
 
         this.classList.add("field")
 
-        // Show/hide options when clicking outside
-        document.addEventListener("click", this.handleClickOutside.bind(this))
-
-        /** @type {ComboBoxSchema} */
         const schema = this.schema
-        /** @type {string} */
         const value = this.value
-        /** @type {string} */
         const namePrefix = this.namePrefix
-        /** @type {boolean} */
         const isNew = this.isNew
 
         const name = `${namePrefix}.${schema.name}`
@@ -142,10 +89,8 @@ export class ComboBox extends Component {
             )
         }
 
-        // Create container for combobox elements
         const container = dom("div", { class: "combobox-container" }, this)
 
-        // Create input element
         this.input = dom(
             "input",
             {
@@ -159,55 +104,58 @@ export class ComboBox extends Component {
                 "aria-expanded": "false",
                 "aria-haspopup": "listbox",
                 role: "combobox",
+                autocomplete: "off",
             },
             container
         )
 
-        // Create options list
         this.optionsList = dom(
             "ul",
             {
                 class: "combobox-options",
                 role: "listbox",
                 "aria-hidden": "true",
+                id: `${id}_listbox`,
             },
             container
         )
 
-        // Populate options if they exist
-        if (schema.options) {
-            this.updateOptions(schema.options, value)
+        this.input.setAttribute("aria-controls", this.optionsList.id)
+
+        this.originalOptions = schema.options || []
+
+        if (this.originalOptions.length > 0) {
+            this.updateOptions(this.originalOptions, value)
         }
 
-        // Event listeners
         this.input.addEventListener("focus", () => {
+            this.isFocusWithin = true
             this.showOptions()
         })
 
-        this.input.addEventListener("click", () => {
-            this.showOptions()
-        })
-
-        this.button.addEventListener("mousedown", (e) => {
-            e.preventDefault() // Prevent input blur
-        })
-
-        this.input.addEventListener("blur", () => {
-            if (!this.interactingWithOptions) {
-                setTimeout(() => this.hideOptions(), 200)
+        this.input.addEventListener("click", (e) => {
+            if (this.optionsList.getAttribute("aria-hidden") === "true") {
+                this.showOptions()
             }
         })
 
-        this.optionsList.addEventListener("mousedown", () => {
-            this.interactingWithOptions = true
-        })
-
-        this.optionsList.addEventListener("mouseup", () => {
-            this.interactingWithOptions = false
-        })
-
-        this.input.addEventListener("keydown", (e) => this.handleKeyDown(e))
         this.input.addEventListener("input", () => this.filterOptions())
+        this.input.addEventListener("keydown", (e) => this.handleKeyDown(e))
+
+        this.addEventListener("focusout", (event) => {
+            if (!this.contains(event.relatedTarget)) {
+                this.isFocusWithin = false
+                this.hideOptions()
+            }
+        })
+
+        this.addEventListener("focusin", () => {
+            this.isFocusWithin = true
+        })
+
+        this.optionsList.addEventListener("mousedown", (e) => {
+            e.preventDefault()
+        })
 
         this.input.addEventListener("invalid", () => {
             this.input.dispatchEvent(
@@ -220,16 +168,16 @@ export class ComboBox extends Component {
         })
     }
 
-    /**
-     * Update the options list
-     * @param {Option[]} options - Array of options
-     * @param {string} selectedValue - Currently selected value
-     */
     updateOptions(options, selectedValue) {
         this.optionsList.innerHTML = ""
+        this.highlightedIndex = -1
 
-        options.forEach((option) => {
-            // Handle both string and object options
+        if (!options || options.length === 0) {
+            this.hideOptions()
+            return
+        }
+
+        options.forEach((option, index) => {
             const optionValue =
                 typeof option === "string" ? option : option.value
             const optionLabel =
@@ -242,6 +190,7 @@ export class ComboBox extends Component {
                     class: "combobox-option",
                     role: "option",
                     "aria-selected": isSelected ? "true" : "false",
+                    id: `${this.input.id}_option_${index}`,
                     onclick: () => {
                         this.selectOption({
                             value: optionValue,
@@ -249,213 +198,269 @@ export class ComboBox extends Component {
                         })
                         this.input.focus()
                     },
-                    onmouseenter: () => {
-                        this.interactingWithOptions = true
-                    },
-                    onmouseleave: () => {
-                        this.interactingWithOptions = false
-                    },
                     html: optionLabel,
                 },
                 this.optionsList
             )
 
             li.dataset.value = optionValue
-        })
-    }
 
-    /**
-     * Handle clicks outside the combobox
-     * @param {MouseEvent} event - The click event
-     */
-    handleClickOutside(event) {
-        if (!this.contains(event.target)) {
-            this.hideOptions()
+            if (
+                this.input.value &&
+                optionLabel.toLowerCase() === this.input.value.toLowerCase()
+            ) {
+                this.highlightedIndex = index
+            }
+        })
+
+        if (this.optionsList.getAttribute("aria-hidden") === "false") {
+            this.showOptions()
         }
     }
 
-    /**
-     * Clean up when element is disconnected
-     */
-    disconnectedCallback() {
-        document.removeEventListener(
-            "click",
-            this.handleClickOutside.bind(this)
+    getVisibleOptions() {
+        return Array.from(
+            this.optionsList.querySelectorAll(
+                '.combobox-option[style*="display: block"]:not([style*="display: none"])'
+            )
         )
     }
 
-    /**
-     * Toggle the options dropdown visibility
-     */
-    toggleOptions() {
-        if (this.optionsList.getAttribute("aria-hidden") === "true") {
-            this.showOptions()
-        } else {
-            this.hideOptions()
-        }
-    }
-
-    /**
-     * Show the options dropdown
-     */
     showOptions() {
+        const visibleOptions = this.getVisibleOptions()
+
+        if (visibleOptions.length === 0) {
+            this.hideOptions()
+            return
+        }
+
         this.optionsList.setAttribute("aria-hidden", "false")
         this.input.setAttribute("aria-expanded", "true")
 
-        // Focus the first selected or first available option
-        const selectedOption = this.optionsList.querySelector(
-            '[aria-selected="true"]'
-        )
-        const firstOption = this.optionsList.querySelector(".combobox-option")
+        this.optionsList.querySelectorAll('[role="option"]').forEach((opt) => {
+            opt.setAttribute("aria-selected", "false")
+        })
 
-        if (selectedOption) {
-            selectedOption.scrollIntoView({ block: "nearest" })
-        } else if (firstOption) {
-            firstOption.scrollIntoView({ block: "nearest" })
+        let optionToHighlight = null
+        if (
+            this.highlightedIndex !== -1 &&
+            visibleOptions[this.highlightedIndex]
+        ) {
+            optionToHighlight = visibleOptions[this.highlightedIndex]
+        } else if (visibleOptions.length > 0) {
+            optionToHighlight = visibleOptions[0]
+            this.highlightedIndex = 0
+        }
+
+        if (optionToHighlight) {
+            optionToHighlight.setAttribute("aria-selected", "true")
+            this.input.setAttribute(
+                "aria-activedescendant",
+                optionToHighlight.id
+            )
+            optionToHighlight.scrollIntoView({ block: "nearest" })
+        } else {
+            this.input.removeAttribute("aria-activedescendant")
         }
     }
 
-    /**
-     * Hide the options dropdown
-     */
     hideOptions() {
         this.optionsList.setAttribute("aria-hidden", "true")
         this.input.setAttribute("aria-expanded", "false")
+        this.input.removeAttribute("aria-activedescendant")
+
+        this.optionsList.querySelectorAll('[role="option"]').forEach((opt) => {
+            opt.setAttribute("aria-selected", "false")
+        })
+        this.highlightedIndex = -1
     }
 
-    /**
-     * Select an option
-     * @param {Option|{value: string, label: string}} option - The option to select (can be string or object)
-     */
     selectOption(option) {
-        // Normalize option to always have value and label properties
-        const normalizedOption =
-            typeof option === "string"
-                ? { value: option, label: option }
-                : option
+        this.input.value = option.label
+        this.input.dataset.value = option.value
 
-        this.input.value = normalizedOption.label
-        this.input.dataset.value = normalizedOption.value
-
-        // Update aria-selected attributes
         this.optionsList.querySelectorAll('[role="option"]').forEach((opt) => {
             opt.setAttribute(
                 "aria-selected",
-                opt.dataset.value === normalizedOption.value ? "true" : "false"
+                opt.dataset.value === option.value ? "true" : "false"
             )
         })
 
-        // Dispatch change event
         const event = new Event("change", { bubbles: true })
         this.input.dispatchEvent(event)
 
         this.hideOptions()
     }
 
-    /**
-     * Filter options based on input value
-     */
     filterOptions() {
         const searchTerm = this.input.value.toLowerCase()
         const options = this.optionsList.querySelectorAll(".combobox-option")
+        let hasVisibleOption = false
 
-        options.forEach((option) => {
+        this.highlightedIndex = -1
+        this.input.removeAttribute("aria-activedescendant")
+        this.optionsList.querySelectorAll('[role="option"]').forEach((opt) => {
+            opt.setAttribute("aria-selected", "false")
+        })
+
+        Array.from(options).forEach((option) => {
             const text = option.textContent.toLowerCase()
             if (text.includes(searchTerm)) {
                 option.style.display = "block"
+                hasVisibleOption = true
             } else {
                 option.style.display = "none"
             }
         })
 
-        this.showOptions()
+        if (hasVisibleOption) {
+            this.showOptions()
+        } else {
+            this.hideOptions()
+        }
     }
 
-    /**
-     * Handle keyboard navigation
-     * @param {KeyboardEvent} e - The keyboard event
-     */
     handleKeyDown(e) {
-        const options = Array.from(
-            this.optionsList.querySelectorAll(
-                '.combobox-option[style="display: block;"], .combobox-option:not([style])'
+        const visibleOptions = this.getVisibleOptions()
+
+        if (visibleOptions.length === 0 && e.key !== "Escape") {
+            return
+        }
+
+        const currentActiveDescendantId = this.input.getAttribute(
+            "aria-activedescendant"
+        )
+        let currentIndex = -1
+        if (currentActiveDescendantId) {
+            const currentActiveOption = document.getElementById(
+                currentActiveDescendantId
             )
-        )
-        const currentIndex = options.findIndex(
-            (opt) => opt.getAttribute("aria-selected") === "true"
-        )
+            if (currentActiveOption) {
+                currentIndex = visibleOptions.indexOf(currentActiveOption)
+            }
+        }
 
         switch (e.key) {
             case "ArrowDown":
                 e.preventDefault()
                 this.showOptions()
-                const nextIndex =
-                    currentIndex < options.length - 1 ? currentIndex + 1 : 0
-                options[nextIndex]?.scrollIntoView({ block: "nearest" })
-                options[nextIndex]?.setAttribute("aria-selected", "true")
-                if (currentIndex >= 0) {
-                    options[currentIndex]?.setAttribute(
+
+                let nextIndex =
+                    currentIndex < visibleOptions.length - 1
+                        ? currentIndex + 1
+                        : 0
+
+                if (visibleOptions[nextIndex]) {
+                    if (currentIndex !== -1 && visibleOptions[currentIndex]) {
+                        visibleOptions[currentIndex].setAttribute(
+                            "aria-selected",
+                            "false"
+                        )
+                    }
+                    visibleOptions[nextIndex].setAttribute(
                         "aria-selected",
-                        "false"
+                        "true"
                     )
+                    this.input.setAttribute(
+                        "aria-activedescendant",
+                        visibleOptions[nextIndex].id
+                    )
+                    visibleOptions[nextIndex].scrollIntoView({
+                        block: "nearest",
+                    })
+                    this.highlightedIndex = nextIndex
                 }
                 break
+
             case "ArrowUp":
                 e.preventDefault()
                 this.showOptions()
-                const prevIndex =
-                    currentIndex > 0 ? currentIndex - 1 : options.length - 1
-                options[prevIndex]?.scrollIntoView({ block: "nearest" })
-                options[prevIndex]?.setAttribute("aria-selected", "true")
-                if (currentIndex >= 0) {
-                    options[currentIndex]?.setAttribute(
+
+                let prevIndex =
+                    currentIndex > 0
+                        ? currentIndex - 1
+                        : visibleOptions.length - 1
+
+                if (visibleOptions[prevIndex]) {
+                    if (currentIndex !== -1 && visibleOptions[currentIndex]) {
+                        visibleOptions[currentIndex].setAttribute(
+                            "aria-selected",
+                            "false"
+                        )
+                    }
+                    visibleOptions[prevIndex].setAttribute(
                         "aria-selected",
-                        "false"
+                        "true"
                     )
+                    this.input.setAttribute(
+                        "aria-activedescendant",
+                        visibleOptions[prevIndex].id
+                    )
+                    visibleOptions[prevIndex].scrollIntoView({
+                        block: "nearest",
+                    })
+                    this.highlightedIndex = prevIndex
                 }
                 break
+
             case "Enter":
                 if (this.optionsList.getAttribute("aria-hidden") === "false") {
                     e.preventDefault()
-                    const selected = this.optionsList.querySelector(
-                        '[aria-selected="true"]'
+                    const selected = this.input.getAttribute(
+                        "aria-activedescendant"
                     )
-                    if (selected) {
+                        ? document.getElementById(
+                              this.input.getAttribute("aria-activedescendant")
+                          )
+                        : null
+
+                    if (
+                        selected &&
+                        selected.classList.contains("combobox-option")
+                    ) {
                         this.selectOption({
                             value: selected.dataset.value,
                             label: selected.textContent,
                         })
+                    } else {
+                        const exactMatchOption = visibleOptions.find(
+                            (opt) =>
+                                opt.textContent.toLowerCase() ===
+                                this.input.value.toLowerCase()
+                        )
+                        if (exactMatchOption) {
+                            this.selectOption({
+                                value: exactMatchOption.dataset.value,
+                                label: exactMatchOption.textContent,
+                            })
+                        } else {
+                            this.hideOptions()
+                        }
                     }
                 }
                 break
+
             case "Escape":
                 this.hideOptions()
                 this.input.focus()
                 break
+
+            case "Tab":
+                this.hideOptions()
+                break
         }
     }
 
-    /**
-     * Get the current value of the combobox
-     * @returns {string} The current value
-     */
     get currentValue() {
         return this.input.dataset.value || this.input.value
     }
 
-    /**
-     * Update the combobox with new schema and value
-     * @param {ComboBoxSchema} schema - The updated schema
-     * @param {string} value - The new value
-     */
     update(schema, value) {
         this.input.value = value ?? ""
-        if (schema.options) {
-            this.updateOptions(schema.options, value)
-        }
+        this.originalOptions = schema.options || []
+        this.updateOptions(this.originalOptions, value)
         updateField(this, schema, this.input)
     }
 }
 
-// Define the custom element
 customElements.define("f-combobox", ComboBox)
