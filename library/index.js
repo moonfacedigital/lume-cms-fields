@@ -144,7 +144,7 @@ customElements.define(
     line-height: 1.4;
 }
 
-.component-card img { 
+.component-card img {
     width: 100%;
     border: 1px solid var(--color-line);
     border-radius: calc(var(--border-radius) - 2px);
@@ -189,7 +189,7 @@ customElements.define(
 }
 
 .no-results-message {
-    text-align: center; 
+    text-align: center;
     padding: 2rem 1rem;
     color: var(--color-text-light);
 }
@@ -252,7 +252,7 @@ customElements.define(
         border-radius: var(--border-radius);
     }
 }
-    `
+            `
             this.appendChild(style)
 
             this.classList.add("field")
@@ -366,7 +366,7 @@ customElements.define(
                 document.body
             )
 
-            // --- NEW --- Setup the search filter event listener
+            // Setup the search filter event listener
             this.setupSearchFilter()
         }
 
@@ -449,10 +449,16 @@ customElements.define(
 
             // Focus search input when modal opens
             searchInput.focus()
+
+            // Disable body scroll
+            document.body.style.overflow = "hidden"
         }
 
         hideComponentModal() {
             this.modal.style.display = "none"
+
+            // Enable body scroll
+            document.body.style.overflow = ""
         }
 
         populateModalContent() {
@@ -549,13 +555,13 @@ customElements.define(
             })
         }
 
-        // --- NEW --- Binds the filter function to the search input
+        // Binds the filter function to the search input
         setupSearchFilter() {
             const searchInput = this.modal.querySelector(".search-input")
             searchInput.addEventListener("input", () => this.filterComponents())
         }
 
-        // --- NEW --- Filters components based on the search query
+        // Filters components based on the search query
         filterComponents() {
             const query = this.modal
                 .querySelector(".search-input")
