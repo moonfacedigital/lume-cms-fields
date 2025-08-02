@@ -57,6 +57,8 @@ customElements.define(
     font-size: 0.9em;
     transition: background-color 0.2s;
     border-radius: var(--border-radius);
+    font-weight: 600;
+
 }
 
 .category-list li:hover {
@@ -65,7 +67,6 @@ customElements.define(
 
 .category-list li.active {
     background-color: var(--color-highlight);
-    font-weight: 600;
 }
 
 .modal-main {
