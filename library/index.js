@@ -4,6 +4,7 @@ import {
     view,
     labelify,
 } from "https://cdn.jsdelivr.net/gh/lumeland/cms@752b7a796a1d7fded4b2a38bad813d6efcf03a49/static/components/utils.js"
+import { serveListener } from "https://deno.land/std@0.192.0/http/server.ts"
 
 customElements.define(
     "f-library",
@@ -20,6 +21,7 @@ customElements.define(
     backdrop-filter: blur(5px);
     z-index: 1000;
     display: none;
+    pointer-events: auto;
 }
 
 .modal-content {
@@ -33,6 +35,11 @@ customElements.define(
     overflow: hidden;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     border: 1px solid var(--color-line);
+    pointer-events: none;
+}
+
+.modal-content > * {
+    pointer-events: auto;
 }
 
 .modal-sidebar {
@@ -110,24 +117,30 @@ customElements.define(
 }
 
 .components-container {
-    padding: 0 1.5em;
+    padding: 1.5em;
     overflow-y: auto;
     flex: 1;
 }
 
+     .components-container > section:not(:first-child) {
+        padding-top: 1em;
+     }
+
+     .components-container section:first-child > h2 {
+       margin-top: 0 !important;
+     }
+
 .component-card {
     background: var(--color-input-bg);
-    border: 1px solid var(--color-line);
     border-radius: var(--border-radius);
+    border: 1px solid var(--color-line);
     padding: 1.25em;
     cursor: pointer;
     transition: all 0.2s;
 }
 
 .component-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    border-color: var(--color-primary);
+    background-color: var(--color-highlight);
 }
 
 .component-card h3 {
@@ -193,6 +206,10 @@ customElements.define(
     padding: 2rem 1rem;
     color: var(--color-text-light);
 }
+    
+.no-scroll {
+    overflow: hidden !important;
+}
 
 /* Responsive Styles for Mobile */
 @media (max-width: 900px) {
@@ -223,6 +240,7 @@ customElements.define(
         grid-area: content;
         padding-top: 1em;
     }
+    
 
     .modal-sidebar {
         grid-area: sidebar;
@@ -340,8 +358,7 @@ customElements.define(
                                                         dom("input", {
                                                             type: "text",
                                                             class: "search-input",
-                                                            placeholder:
-                                                                "Search components...",
+                                                            placeholder: `Search ${schema.label}...`,
                                                         }),
                                                     ],
                                                 }),
@@ -451,14 +468,13 @@ customElements.define(
             searchInput.focus()
 
             // Disable body scroll
-            document.body.style.overflow = "hidden"
+            document.querySelector("html").classList.add("no-scroll")
         }
 
         hideComponentModal() {
             this.modal.style.display = "none"
 
-            // Enable body scroll
-            document.body.style.overflow = ""
+            document.querySelector("html").classList.remove("no-scroll")
         }
 
         populateModalContent() {
@@ -611,9 +627,9 @@ customElements.define(
                     noResultsEl = dom("div", {
                         class: "no-results-message",
                         html:
-                            '<h3>No components found</h3><p>Your search for "' +
+                            `<h3>No ${this.schema.label} found</h3><p>Your search for "` +
                             query +
-                            '" did not match any components.</p>',
+                            `" did not match any ${this.schema.label}.</p>`,
                     })
                     mainContainer.appendChild(noResultsEl)
                 }
@@ -621,7 +637,7 @@ customElements.define(
                 noResultsEl.querySelector("p").innerHTML =
                     'Your search for "<b>' +
                     query +
-                    '</b>" did not match any components.'
+                    `</b>" did not match any ${this.schema.label}.`
             } else if (noResultsEl) {
                 noResultsEl.style.display = "none"
             }
@@ -641,24 +657,56 @@ customElements.define(
                 this.modal.observer.disconnect()
             }
 
-            const observer = new IntersectionObserver(
-                (entries) => {
-                    entries.forEach((entry) => {
-                        if (entry.isIntersecting) {
-                            const category =
-                                entry.target.getAttribute("data-category")
-                            sidebarItems.forEach((item) => {
-                                item.classList.toggle(
-                                    "active",
-                                    item.getAttribute("data-category") ===
-                                        category
-                                )
-                            })
+            // This rootMargin creates a narrow horizontal line at the very top of the container.
+            // An element is considered intersecting when its top edge crosses this line.
+            // The -99% for the bottom margin ensures that the intersection zone is at the top.
+            const options = {
+                root: mainContentContainer,
+                rootMargin: "0px 0px -99% 0px",
+                threshold: 0,
+            }
+
+            const observer = new IntersectionObserver((entries) => {
+                let activeCategory = null
+
+                // Iterate through all entries to find the one whose top is at the top of the container
+                for (const entry of entries) {
+                    if (entry.isIntersecting) {
+                        activeCategory =
+                            entry.target.getAttribute("data-category")
+                        break
+                    }
+                }
+
+                // Fallback for when no section is currently intersecting (e.g., at the very bottom)
+                if (!activeCategory) {
+                    // Find the last section that has scrolled entirely past the top of the viewport
+                    const lastPassedSection = Array.from(sections).findLast(
+                        (section) => {
+                            const rect = section.getBoundingClientRect()
+                            return rect.top < 0
                         }
-                    })
-                },
-                { root: mainContentContainer, threshold: 0.5 }
-            )
+                    )
+                    if (lastPassedSection) {
+                        activeCategory =
+                            lastPassedSection.getAttribute("data-category")
+                    }
+                }
+
+                // Final fallback: if no other logic applies, activate the first section
+                if (!activeCategory && sections.length > 0) {
+                    activeCategory = sections[0].getAttribute("data-category")
+                }
+
+                // Update the active class on the sidebar items
+                sidebarItems.forEach((item) => {
+                    if (item.getAttribute("data-category") === activeCategory) {
+                        item.classList.add("active")
+                    } else {
+                        item.classList.remove("active")
+                    }
+                })
+            }, options)
 
             sections.forEach((section) => observer.observe(section))
             this.modal.observer = observer

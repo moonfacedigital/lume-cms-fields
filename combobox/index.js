@@ -175,53 +175,91 @@ export class ComboBox extends Component {
     }
 
     updateOptions(options, selectedValue) {
-        this.optionsList.innerHTML = ""
-        this.highlightedIndex = -1
-
-        if (!options || options.length === 0) {
-            this.hideOptions()
+        // Double safety check for DOM elements
+        if (!this.isConnected || !this.optionsList || !this.input) {
             return
         }
 
-        options.forEach((option, index) => {
-            const optionValue =
-                typeof option === "string" ? option : option.value
-            const optionLabel =
-                typeof option === "string" ? option : option.label
-            const isSelected = optionValue === selectedValue
+        // Store previous state
+        const wasOpen = this.optionsList.getAttribute("aria-hidden") === "false"
+        const previousHighlight = this.highlightedIndex
 
-            const li = dom(
-                "li",
-                {
-                    class: "combobox-option",
-                    role: "option",
-                    "aria-selected": isSelected ? "true" : "false",
-                    id: `${this.input.id}_option_${index}`,
-                    onclick: () => {
-                        this.selectOption({
-                            value: optionValue,
-                            label: optionLabel,
-                        })
-                        this.input.focus()
-                    },
-                    html: optionLabel,
-                },
-                this.optionsList
-            )
-
-            li.dataset.value = optionValue
-
-            if (
-                this.input.value &&
-                optionLabel.toLowerCase() === this.input.value.toLowerCase()
-            ) {
-                this.highlightedIndex = index
+        try {
+            // Clear options with minimal DOM impact
+            while (this.optionsList.firstChild) {
+                this.optionsList.removeChild(this.optionsList.firstChild)
             }
+
+            this.highlightedIndex = -1
+
+            if (!options || options.length === 0) {
+                this.hideOptions()
+                return
+            }
+
+            // Create document fragment for batch DOM insertion
+            const fragment = document.createDocumentFragment()
+
+            options.forEach((option, index) => {
+                const optionValue =
+                    option.value !== undefined ? option.value : option
+                const optionLabel =
+                    option.label !== undefined ? option.label : optionValue
+                const isSelected = String(optionValue) === String(selectedValue)
+
+                const li = document.createElement("li")
+                li.className = "combobox-option"
+                li.setAttribute("role", "option")
+                li.setAttribute("aria-selected", isSelected)
+                li.id = `${this.input.id}_option_${index}`
+                li.innerHTML = optionLabel
+                li.dataset.value = optionValue
+
+                li.addEventListener("click", () => {
+                    this.selectOption({
+                        value: optionValue,
+                        label: optionLabel,
+                    })
+                })
+
+                fragment.appendChild(li)
+            })
+
+            this.optionsList.appendChild(fragment)
+
+            // Restore previous UI state if needed
+            if (wasOpen || selectedValue === "/") {
+                this.showOptions()
+                if (
+                    previousHighlight >= 0 &&
+                    previousHighlight < options.length
+                ) {
+                    this.highlightOption(previousHighlight)
+                }
+            }
+        } catch (error) {
+            console.debug("Combobox options update failed:", error)
+            this.hideOptions()
+        }
+    }
+
+    highlightOption(index) {
+        if (!this.optionsList || index < 0) return
+
+        const options = this.optionsList.querySelectorAll(".combobox-option")
+        if (index >= options.length) return
+
+        // Remove highlight from all options
+        options.forEach((opt) => {
+            opt.setAttribute("aria-selected", "false")
         })
 
-        if (this.optionsList.getAttribute("aria-hidden") === "false") {
-            this.showOptions()
-        }
+        // Highlight selected option
+        const option = options[index]
+        option.setAttribute("aria-selected", "true")
+        this.input.setAttribute("aria-activedescendant", option.id)
+        option.scrollIntoView({ block: "nearest" })
+        this.highlightedIndex = index
     }
 
     getVisibleOptions() {
@@ -282,20 +320,31 @@ export class ComboBox extends Component {
     }
 
     selectOption(option) {
-        this.input.value = option.label
-        this.input.dataset.value = option.value
+        if (!this.input) return
 
-        this.optionsList.querySelectorAll('[role="option"]').forEach((opt) => {
-            opt.setAttribute(
-                "aria-selected",
-                opt.dataset.value === option.value ? "true" : "false"
-            )
+        // Use microtask to ensure any pending updates complete first
+        queueMicrotask(() => {
+            try {
+                this.input.value = option.label
+                this.input.dataset.value = option.value
+
+                const event = new Event("change", {
+                    bubbles: true,
+                    cancelable: true,
+                })
+                this.input.dispatchEvent(event)
+
+                // Special handling for root page selection
+                if (option.value === "/") {
+                    this.hideOptions()
+                    setTimeout(() => this.input.focus(), 10)
+                } else {
+                    this.hideOptions()
+                }
+            } catch (error) {
+                console.debug("Option selection failed:", error)
+            }
         })
-
-        const event = new Event("change", { bubbles: true })
-        this.input.dispatchEvent(event)
-
-        this.hideOptions()
     }
 
     filterOptions() {
@@ -461,11 +510,76 @@ export class ComboBox extends Component {
         return this.input.dataset.value || this.input.value
     }
 
+    findLabel(options, value) {
+        if (!options) return null
+        const found = options.find(
+            (opt) =>
+                String(opt.value !== undefined ? opt.value : opt) ===
+                String(value)
+        )
+        return found?.label ?? found?.value ?? found
+    }
+
     update(schema, value) {
-        this.input.value = value ?? ""
-        this.originalOptions = schema.options || []
-        this.updateOptions(this.originalOptions, value)
-        updateField(this, schema, this.input)
+        if (!this.isConnected || !this.input) {
+            return
+        }
+
+        // Debounce rapid updates
+        if (this._updatePending) {
+            return
+        }
+        this._updatePending = true
+
+        requestAnimationFrame(() => {
+            try {
+                // Store current focus state
+                const hadFocus = this.isFocusWithin
+
+                // Find appropriate display value
+                let displayValue
+                if (schema.options) {
+                    const foundOption = schema.options.find(
+                        (opt) =>
+                            String(
+                                opt.value !== undefined ? opt.value : opt
+                            ) === String(value)
+                    )
+                    displayValue =
+                        foundOption?.label ??
+                        foundOption?.value ??
+                        foundOption ??
+                        value
+                } else {
+                    displayValue = value
+                }
+
+                // Update input value without triggering unnecessary events
+                if (this.input.value !== displayValue) {
+                    this.input.value = displayValue ?? ""
+                }
+
+                // Update options if they changed
+                const optionsChanged =
+                    JSON.stringify(this.originalOptions) !==
+                    JSON.stringify(schema.options)
+                if (optionsChanged || value === "/") {
+                    this.originalOptions = schema.options || []
+                    this.updateOptions(this.originalOptions, value)
+                }
+
+                // Restore focus state if needed
+                if (hadFocus && value === "/") {
+                    this.input.focus()
+                }
+
+                updateField(this, schema, this.input)
+            } catch (error) {
+                console.debug("Combobox update failed:", error)
+            } finally {
+                this._updatePending = false
+            }
+        })
     }
 }
 
