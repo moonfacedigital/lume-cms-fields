@@ -1,10 +1,9 @@
-import { Component } from "https://cdn.jsdelivr.net/gh/lumeland/cms@752b7a796a1d7fded4b2a38bad813d6efcf03a49/static/components/component.js"
+import { Component } from "https://cdn.jsdelivr.net/gh/lumeland/cms@3e98bdf869d7d526c241191031a0361ef894df73/static/components/component.js"
 import dom from "https://esm.sh/gh/oscarotero/dom@v0.1.0/dom.js"
 import {
     view,
     labelify,
 } from "https://cdn.jsdelivr.net/gh/lumeland/cms@752b7a796a1d7fded4b2a38bad813d6efcf03a49/static/components/utils.js"
-import { serveListener } from "https://deno.land/std@0.192.0/http/server.ts"
 
 customElements.define(
     "f-library",
